@@ -1,0 +1,1 @@
+python3 ./expts/expt1/inference.py
