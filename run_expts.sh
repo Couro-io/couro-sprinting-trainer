@@ -1,6 +1,7 @@
 # Run baseline yolov7
 python3 ./couro/experiments/baseline/inference.py
 
+:'
 # Fine-tuning for running phase detection
 python3 ./couro/experiments/running_phase_detection/train.py \
     --epochs 100 \
@@ -10,3 +11,5 @@ python3 ./couro/experiments/running_phase_detection/train.py \
     --data 
 
 # Fine-tuning for action recognition
+
+'
