@@ -6,3 +6,5 @@ tools/
 figure/
 images/
 venv/
+*.mp4
+*.mov

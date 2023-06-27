@@ -6,6 +6,7 @@ from utils.datasets import letterbox
 from utils.general import non_max_suppression_kpt
 from utils.plots import output_to_keypoint, plot_skeleton_kpts
 from urllib.parse import unquote
+from tqdm import tqdm
 
 import torch
 from torchvision import transforms
@@ -54,81 +55,113 @@ def draw_keypoints(output, image):
 
   return nimg
 
-def pose_estimation_video(filename, obj):
-    cap = cv2.VideoCapture()
-    cap.open(filename)
+def pose_estimation_video(s3_url):
+    bucket_name, object_key = extract_bucket_and_key(s3_url)
+    temp_file_path = download_file_from_s3(bucket_name, object_key)
+    
+    folder_name = object_key.split('/')[-1].split('.')[0]
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
 
-    # VideoWriter for saving the video
-    if filename.endswith(".mp4"):
+    frames = load_video(temp_file_path)
+    height, width = 416, 416
+
+    processed_frames = []
+    for idx, frame in tqdm(enumerate(frames), total=len(frames)):
+        processed_frame = process_frame(frame)
+        processed_frames.append(processed_frame)
+        cv2.imshow('Pose estimation', processed_frame)
+        
+        output_path = f'./{folder_name}/{folder_name}_{idx}.jpg'
+        cv2.imwrite(output_path, processed_frame)
+        print(f'Saved processed frame {idx} as {output_path}')
+    
+    cv2.destroyAllWindows()
+
+    write_video_to_s3(processed_frames, bucket_name, object_key)
+
+def extract_bucket_and_key(s3_url):
+    parts = s3_url.split('//')[1].split('/')[0].split('.')
+    bucket_name = parts[0]
+    object_key = unquote('/'.join(s3_url.split('//')[1].split('/')[1:]))
+    return bucket_name, object_key
+
+def download_file_from_s3(bucket_name, object_key):
+    s3 = boto3.client('s3')
+    temp_file_path = tempfile.NamedTemporaryFile(suffix=os.path.splitext(object_key)[1]).name
+    s3.download_file(bucket_name, object_key, temp_file_path)
+    return temp_file_path
+
+def load_video(file_path):
+    cap = cv2.VideoCapture(file_path)
+    frames = []
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if ret:
+            frames.append(frame)
+        else:
+            break
+    cap.release()
+    return frames
+
+def process_frame(frame):
+    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    output, processed_frame = run_inference(frame)
+    processed_frame = draw_keypoints(output, processed_frame)
+    processed_frame = cv2.resize(processed_frame, (416, 416))
+    return processed_frame
+
+def write_video_to_s3(frames, bucket_name, object_key):
+    temp_file_path = tempfile.NamedTemporaryFile(suffix=os.path.splitext(object_key)[1]).name
+
+    if object_key.endswith(".mp4"):
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    elif filename.endswith(".mov"):
+    elif object_key.endswith(".mov"):
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
     else:
         raise ValueError("Unsupported file extension.")
-    out = cv2.VideoWriter(f"{os.path.splitext(filename)[0]}_output{os.path.splitext(filename)[1]}", fourcc, 30.0, (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))))
 
-    while cap.isOpened():
-        (ret, frame) = cap.read()
-        if ret == True:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            output, frame = run_inference(frame)
-            frame = draw_keypoints(output, frame)
-            frame = cv2.resize(frame, (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))))
-            out.write(frame)
-            cv2.imshow('Pose estimation', frame)
-        else:
-            break
+    frame_height, frame_width, _ = frames[0].shape
+    out = cv2.VideoWriter(temp_file_path, fourcc, 30.0, (frame_width, frame_height))
 
-        if cv2.waitKey(10) & 0xFF == ord('q'):
-            break
-
-    cap.release()
+    for frame in frames:
+        out.write(frame)
     out.release()
-    cv2.destroyAllWindows()
-    
-def load_video_from_s3(s3_url):
-    # Extract bucket name and object key from the S3 URL
-    bucket_name = s3_url.split('//')[1].split('/')[0].split('.')[0]
-    object_key = unquote('/'.join(s3_url.split('//')[1].split('/')[1:]))
 
-    # Create a boto3 S3 client
     s3 = boto3.client('s3')
+    s3.upload_file(temp_file_path, bucket_name, object_key)
 
-    # Get the file as a stream from S3
-    response = s3.get_object(Bucket=bucket_name, Key=object_key)
-    file_stream = response['Body']
+    os.remove(temp_file_path)
+    
+def frames_to_video(frames_directory, output_path):
+    # Get a list of frame filenames in the directory
+    frame_filenames = sorted(os.listdir(frames_directory))
 
-    # Convert the stream to a numpy array
-    file_bytes = file_stream.read()
-    file_array = np.frombuffer(file_bytes, dtype=np.uint8)
-    return object_key, file_array
+    # Prepare video writer
+    frame = cv2.imread(os.path.join(frames_directory, frame_filenames[0]))
+    height, width, _ = frame.shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Specify the video codec
+    out = cv2.VideoWriter(output_path, fourcc, 30.0, (width, height))
 
-def write_video_to_s3(video_frames, bucket_name, object_key, output_format='.mp4'):
-    # Create a temporary file to save the video locally
-    temp_filename = tempfile.NamedTemporaryFile(suffix=output_format).name
-
-    # Create a VideoWriter to save the video
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(temp_filename, fourcc, 30.0, (video_width, video_height))
-
-    # Write the video frames to the VideoWriter
-    for frame in video_frames:
+    # Write frames to video
+    for i in range(len(frame_filenames)):
+        frame_path = os.path.join(frames_directory, frame_filenames[i])
+        frame = cv2.imread(frame_path)
         out.write(frame)
 
-    # Release the VideoWriter
+    # Release the video writer
     out.release()
 
-    # Upload the video file to S3
-    s3 = boto3.client('s3')
-    s3.upload_file(temp_filename, bucket_name, object_key + output_format)
-
-    # Remove the temporary file
-    os.remove(temp_filename)
-
 if __name__ == "__main__":
+    """
     test_mov = "https://pose-estimation-db.s3.us-west-1.amazonaws.com/testuser%40test.com/test.mov"
-    filename, obj = load_video_from_s3(test_mov)
-    
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = load_model(device)
-    pose_estimation_video(filename, obj)
+    pose_estimation_video(test_mov)
+    """
+    
+    test_dir = "./test"
+    output_path = "./test.mp4"
+    frames_to_video(test_dir, output_path)
+    
