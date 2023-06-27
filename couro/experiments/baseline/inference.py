@@ -19,6 +19,7 @@ import sagemaker
 import boto3
 
 def load_model(device, model_path:str="./yolov7/yolov7-w6-pose.pt"):
+    """Default model is yolo v7 pose estimation"""
     model = torch.load(model_path, map_location=device)['model']
     model.float().eval()
     if torch.cuda.is_available():
@@ -26,14 +27,11 @@ def load_model(device, model_path:str="./yolov7/yolov7-w6-pose.pt"):
     return model
 
 def run_inference(image):
-    # Resize and pad image
-    image = letterbox(image, 960, stride=64, auto=True)[0] # shape: (567, 960, 3)
-    # Apply transforms
-    image = transforms.ToTensor()(image) # torch.Size([3, 567, 960])
+    image = letterbox(image, 1920, stride=64, auto=True)[0] 
+    image = transforms.ToTensor()(image) 
     if torch.cuda.is_available():
       image = image.half().to(device)
-    # Turn image into batch
-    image = image.unsqueeze(0) # torch.Size([1, 3, 567, 960])
+    image = image.unsqueeze(0) 
     with torch.no_grad():
       output, _ = model(image)
     return output, image
@@ -64,7 +62,6 @@ def pose_estimation_video(s3_url):
         os.makedirs(folder_name)
 
     frames = load_video(temp_file_path)
-    height, width = 416, 416
 
     processed_frames = []
     for idx, frame in tqdm(enumerate(frames), total=len(frames)):
@@ -73,6 +70,7 @@ def pose_estimation_video(s3_url):
         cv2.imshow('Pose estimation', processed_frame)
         
         output_path = f'./{folder_name}/{folder_name}_{idx}.jpg'
+        processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
         cv2.imwrite(output_path, processed_frame)
         print(f'Saved processed frame {idx} as {output_path}')
     
@@ -104,11 +102,11 @@ def load_video(file_path):
     cap.release()
     return frames
 
-def process_frame(frame):
-    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+def process_frame(frame, height:int=608, width:int=608):
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     output, processed_frame = run_inference(frame)
     processed_frame = draw_keypoints(output, processed_frame)
-    processed_frame = cv2.resize(processed_frame, (416, 416))
+    processed_frame = cv2.resize(processed_frame, (height, width))
     return processed_frame
 
 def write_video_to_s3(frames, bucket_name, object_key):
@@ -153,15 +151,13 @@ def frames_to_video(frames_directory, output_path):
     out.release()
 
 if __name__ == "__main__":
-    """
     test_mov = "https://pose-estimation-db.s3.us-west-1.amazonaws.com/testuser%40test.com/CaVa73_230528_LJ3_400.mov"
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = load_model(device)
     pose_estimation_video(test_mov)
-    """
     
-    test_dir = "./CaVa73_230528_LJ3_400"
-    output_path = "./CaVa73_230528_LJ3_400.mp4"
-    frames_to_video(test_dir, output_path)
+    #test_dir = "./CaVa73_230528_LJ3_400"
+    #output_path = "./CaVa73_230528_LJ3_400.mp4"
+    #frames_to_video(test_dir, output_path)
     
