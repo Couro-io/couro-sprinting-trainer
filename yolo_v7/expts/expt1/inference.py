@@ -154,14 +154,14 @@ def frames_to_video(frames_directory, output_path):
 
 if __name__ == "__main__":
     """
-    test_mov = "https://pose-estimation-db.s3.us-west-1.amazonaws.com/testuser%40test.com/test.mov"
+    test_mov = "https://pose-estimation-db.s3.us-west-1.amazonaws.com/testuser%40test.com/CaVa73_230528_LJ3_400.mov"
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = load_model(device)
     pose_estimation_video(test_mov)
     """
     
-    test_dir = "./test"
-    output_path = "./test.mp4"
+    test_dir = "./CaVa73_230528_LJ3_400"
+    output_path = "./CaVa73_230528_LJ3_400.mp4"
     frames_to_video(test_dir, output_path)
     
