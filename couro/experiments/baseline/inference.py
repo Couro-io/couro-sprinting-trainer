@@ -18,6 +18,19 @@ import numpy as np
 import sagemaker
 import boto3
 
+from torch.utils.data import Dataset, DataLoader
+
+class FrameDataset(Dataset):
+    def __init__(self, frames):
+        self.frames = frames
+
+    def __len__(self):
+        return len(self.frames)
+
+    def __getitem__(self, idx):
+        frame = self.frames[idx]
+        return frame, idx
+
 def load_model(device, model_path:str="./yolov7/yolov7-w6-pose.pt"):
     """Default model is yolo v7 pose estimation"""
     model = torch.load(model_path, map_location=device)['model']
@@ -27,13 +40,17 @@ def load_model(device, model_path:str="./yolov7/yolov7-w6-pose.pt"):
     return model
 
 def run_inference(image):
+    # if the image is a PyTorch tensor, convert it to a numpy array
+    if isinstance(image, torch.Tensor):
+        image = image.numpy()
+        
     image = letterbox(image, 1920, stride=64, auto=True)[0] 
     image = transforms.ToTensor()(image) 
     if torch.cuda.is_available():
-      image = image.half().to(device)
+        image = image.half().to(device)
     image = image.unsqueeze(0) 
     with torch.no_grad():
-      output, _ = model(image)
+        output, _ = model(image)
     return output, image
 
 def draw_keypoints(output, image):
@@ -53,16 +70,19 @@ def draw_keypoints(output, image):
 
   return nimg
 
-def pose_estimation_video(s3_url):
+def pose_estimation_video(s3_url, batch_size=8):
     bucket_name, object_key = extract_bucket_and_key(s3_url)
     temp_file_path = download_file_from_s3(bucket_name, object_key)
         
     frames, fps = load_video(temp_file_path)
         
+    frame_dataset = FrameDataset(frames)
+    dataloader = DataLoader(frame_dataset, batch_size=batch_size)
+
     processed_frames = []
-    for idx, frame in tqdm(enumerate(frames), total=len(frames)):
-        processed_frame = process_frame(frame)
-        processed_frames.append(processed_frame)
+    for frame_batch, idx_batch in tqdm(dataloader):
+        processed_batch = process_frame_batch(frame_batch, idx_batch)
+        processed_frames.extend(processed_batch)
 
     write_video_to_s3(processed_frames, fps, bucket_name, object_key)
 
@@ -91,11 +111,14 @@ def load_video(file_path):
     cap.release()
     return frames, fps
 
-def process_frame(frame):
-    output, processed_frame = run_inference(frame)
-    processed_frame = draw_keypoints(output, processed_frame)
-    processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-    return processed_frame
+def process_frame_batch(frame_batch, idx_batch):
+    processed_batch = []
+    for frame in frame_batch:
+        output, processed_frame = run_inference(frame)
+        processed_frame = draw_keypoints(output, processed_frame)
+        processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+        processed_batch.append(processed_frame)
+    return processed_batch
 
 def write_video_to_s3(frames, fps, bucket_name, object_key):
     temp_file_path = tempfile.NamedTemporaryFile(suffix=os.path.splitext(object_key)[1]).name
