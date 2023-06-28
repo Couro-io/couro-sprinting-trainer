@@ -40,10 +40,18 @@ def load_model(device, model_path:str="./yolov7/yolov7-w6-pose.pt"):
     return model
 
 def run_inference(image):
+    scale_percent = 60 # percent of original size, you can adjust this as needed
+    width = int(image.shape[1] * scale_percent / 100)
+    height = int(image.shape[0] * scale_percent / 100)
+    dim = (width, height)
+
     # if the image is a PyTorch tensor, convert it to a numpy array
     if isinstance(image, torch.Tensor):
         image = image.numpy()
-        
+
+    # resize the image
+    image = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+    
     image = letterbox(image, 1920, stride=64, auto=True)[0] 
     image = transforms.ToTensor()(image) 
     if torch.cuda.is_available():
