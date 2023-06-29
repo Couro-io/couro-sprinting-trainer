@@ -1,7 +1,8 @@
 """
 Inference.py
-This script is used to run yolo v7 video inference on a video file and upload the results to S3 for a single user. 
+This script is used to run yolo v7 video inference on a video file and upload the results to S3 for a single user.
 """
+
 import os
 import sys
 import tempfile
@@ -65,7 +66,7 @@ def run_inference(image, model):
         output, _ = model(image)
     return output, image
 
-def draw_keypoints(output, image, model):  # Add a model parameter here
+def draw_keypoints(output, image, model):  
     """Draws keypoints on the image."""
     output = non_max_suppression_kpt(output, 
                                         0.25, # Confidence Threshold
@@ -89,6 +90,9 @@ def pose_estimation_video(s3_url, batch_size=8, num_processes=8):
     temp_file_path = download_file_from_s3(bucket_name, object_key)
     
     frames, fps = load_video(temp_file_path)
+    
+    save_directory_name = os.path.splitext(object_key.split('/')[-1])[0]
+    save_frames_locally(frames, save_directory_name)
         
     frame_dataset = FrameDataset(frames)
     dataloader = DataLoader(frame_dataset, batch_size=batch_size)
@@ -163,6 +167,15 @@ def write_video_to_s3(frames, fps, bucket_name, object_key):
     s3.upload_file(temp_file_path, bucket_name, prediction_object_key)
 
     os.remove(temp_file_path)
+
+def save_frames_locally(frames, directory_name):
+    """Saves the processed frames locally in a directory named after the directory_name."""
+    save_dir = os.path.join("./couro/data", directory_name)
+    os.makedirs(save_dir, exist_ok=True)
+
+    for idx, frame in enumerate(frames):
+        frame_path = os.path.join(save_dir, f"frame_{idx}.jpg")
+        cv2.imwrite(frame_path, frame)
 
 if __name__ == "__main__":
     test_mov = "https://pose-estimation-db.s3.us-west-1.amazonaws.com/testuser%40test.com/CaVa73_230528_LJ3_400.mov"
