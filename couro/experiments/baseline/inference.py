@@ -1,7 +1,8 @@
 """
 Inference.py
-This script is used to run yolo v7 video inference on a video file and upload the results to S3 for a single user. 
+This script is used to run yolo v7 video inference on a video file and upload the results to S3 for a single user.
 """
+
 import os
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from tqdm import tqdm
 import torch
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
+import torch.multiprocessing as mp
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
@@ -41,7 +43,7 @@ def load_model(device, model_path:str="./yolov7/yolov7-w6-pose.pt"):
         model.half().to(device)
     return model
 
-def run_inference(image):
+def run_inference(image, model):
     """Runs inference on a single image."""
     scale_percent = 60 # percent of original size, you can adjust this as needed
     width = int(image.shape[1] * scale_percent / 100)
@@ -64,7 +66,7 @@ def run_inference(image):
         output, _ = model(image)
     return output, image
 
-def draw_keypoints(output, image):
+def draw_keypoints(output, image, model):  
     """Draws keypoints on the image."""
     output = non_max_suppression_kpt(output, 
                                         0.25, # Confidence Threshold
@@ -82,20 +84,25 @@ def draw_keypoints(output, image):
 
     return nimg
 
-def pose_estimation_video(s3_url, batch_size=8):
+def pose_estimation_video(s3_url, batch_size=8, num_processes=8):
     """Runs pose estimation on a video file and uploads the results to S3."""
     bucket_name, object_key = extract_bucket_and_key(s3_url)
     temp_file_path = download_file_from_s3(bucket_name, object_key)
-        
+    
     frames, fps = load_video(temp_file_path)
+    
+    save_directory_name = os.path.splitext(object_key.split('/')[-1])[0]
+    save_frames_locally(frames, save_directory_name)
         
     frame_dataset = FrameDataset(frames)
     dataloader = DataLoader(frame_dataset, batch_size=batch_size)
 
     processed_frames = []
-    for frame_batch, idx_batch in tqdm(dataloader):
-        processed_batch = process_frame_batch(frame_batch, idx_batch)
-        processed_frames.extend(processed_batch)
+    
+    with mp.Pool(processes=num_processes) as pool:
+        for frame_batch, idx_batch in tqdm(dataloader):
+            processed_batch = pool.map(process_frame_batch, [(frame, idx, model) for frame, idx in zip(frame_batch, idx_batch)])
+            processed_frames.extend(processed_batch)
 
     write_video_to_s3(processed_frames, fps, bucket_name, object_key)
 
@@ -127,15 +134,13 @@ def load_video(file_path):
     cap.release()
     return frames, fps
 
-def process_frame_batch(frame_batch, idx_batch):
+def process_frame_batch(args):
     """Processes a batch of frames."""
-    processed_batch = []
-    for frame in frame_batch:
-        output, processed_frame = run_inference(frame)
-        processed_frame = draw_keypoints(output, processed_frame)
-        processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-        processed_batch.append(processed_frame)
-    return processed_batch
+    frame, idx, model = args
+    output, processed_frame = run_inference(frame, model)
+    processed_frame = draw_keypoints(output, processed_frame, model)  # Pass the model here
+    processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+    return processed_frame
 
 def write_video_to_s3(frames, fps, bucket_name, object_key):
     """Writes a video file to S3."""
@@ -162,6 +167,15 @@ def write_video_to_s3(frames, fps, bucket_name, object_key):
     s3.upload_file(temp_file_path, bucket_name, prediction_object_key)
 
     os.remove(temp_file_path)
+
+def save_frames_locally(frames, directory_name):
+    """Saves the processed frames locally in a directory named after the directory_name."""
+    save_dir = os.path.join("./couro/data", directory_name)
+    os.makedirs(save_dir, exist_ok=True)
+
+    for idx, frame in enumerate(frames):
+        frame_path = os.path.join(save_dir, f"frame_{idx}.jpg")
+        cv2.imwrite(frame_path, frame)
 
 if __name__ == "__main__":
     test_mov = "https://pose-estimation-db.s3.us-west-1.amazonaws.com/testuser%40test.com/CaVa73_230528_LJ3_400.mov"
