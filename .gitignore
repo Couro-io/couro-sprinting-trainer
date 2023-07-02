@@ -10,3 +10,4 @@ venv/
 *.mov
 
 *.pkl
+*.pth
