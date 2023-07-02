@@ -45,7 +45,7 @@ def run_inference(model, input_data):
         print(f"Action: {label}, Score: {score}")
         
 if __name__ == "__main__":
-    config_file = ""
+    config_file = "./mmaction2/configs/recognition/csn/ipcsn_ig65m_pretrained_bnfrozen_r152_32x2x1_58e_kinetics400_rgb.py"
     checkpoint_file = ""
     video_file = 'path_to_video_file.mp4'  # Provide the path to the video file
 
