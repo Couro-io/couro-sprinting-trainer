@@ -10,16 +10,12 @@ sys.path.append('./mmaction2/')
 
 import torch
 from torchvision.io import read_video
-from mmaction.models import build_model
-from mmcv.runner import load_checkpoint
-from mmaction.datasets.pipelines import Compose
+from operator import itemgetter
 from mmaction.apis import init_recognizer, inference_recognizer
 
 def load_model(config_file:str, checkpoint_file:str):
     """Load PyTorch model from config and checkpoint files."""
-    model = build_model(config_file)
-    checkpoint = load_checkpoint(model, checkpoint_file)
-    model.eval()
+    model = init_recognizer(config_file, checkpoint_file, device='cpu')
     
     return model
 
@@ -45,10 +41,9 @@ def run_inference(model, input_data):
         print(f"Action: {label}, Score: {score}")
         
 if __name__ == "__main__":
-    config_file = ""
-    checkpoint_file = ""
-    video_file = 'path_to_video_file.mp4'  # Provide the path to the video file
+    config_file = "./mmaction2/configs/recognition/csn/ipcsn_ig65m-pretrained-r152-bnfrozen_32x2x1-58e_kinetics400-rgb.py"
+    checkpoint_file = "./couro/experiments/02_sports_recognition/checkpoints/vmz_ipcsn_sports1m_pretrained_r152_32x2x1_58e_kinetics400_rgb_20210617-3367437a.pth"
+    video_file = './test_cases/_aJOs5B9T-Q.mp4'  # Provide the path to the video file
 
     model = load_model(config_file, checkpoint_file)
-    input_data = process_video_data(model)
-    run_inference(model, input_data)
+    pred_results = inference_recognizer(model, video_file)

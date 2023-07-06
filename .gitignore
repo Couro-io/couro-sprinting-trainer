@@ -11,3 +11,5 @@ venv/
 
 *.pkl
 *.pth
+
+*.DS_Store
