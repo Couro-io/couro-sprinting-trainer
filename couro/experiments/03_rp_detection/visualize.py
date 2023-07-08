@@ -67,10 +67,14 @@ def draw_barplot(df: pd.DataFrame, title:str=''):
     """
     Draw a barplot given a dataframe of the label distribution.
     """
+    order = ['Initial Swing', 'Midswing', 'Terminal Swing',  'Initial Contact', 'Midstance', 'Terminal Stance']
+    plt.figure(figsize=(11, 8))  # Set the size of the plot
     ax = sns.barplot(x='label', y='count',
                  data=df,
+                 order=order,
                  errwidth=0)
     ax.bar_label(ax.containers[0])
+    ax.set_xticklabels(order)
     plt.title(f"{title} label distribution", loc='left')
     plt.show()
     
@@ -103,5 +107,8 @@ def return_video1_pipe():
             
             
 if __name__ == "__main__":
+    df = get_multi_video_label_count(annotation_dir='./annotations/train/')
+    draw_barplot(df, title='Training set')
+    
     df = get_multi_video_label_count(annotation_dir='./annotations/validation/')
     draw_barplot(df, title='Validation set')
