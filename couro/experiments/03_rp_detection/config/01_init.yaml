@@ -1,0 +1,5 @@
+train: ./data/train
+val: ./data/validation
+
+nc: 6
+names: ['Initial Swing', 'Midswing', 'Terminal Swing',  'Initial Contact', 'Midstance', 'Terminal Stance']
