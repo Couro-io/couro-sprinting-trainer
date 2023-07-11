@@ -2,6 +2,7 @@
 Data preprocessing for the RP detection experiment.
 """
 import sys
+import shutil
 from pprint import pprint
 from datetime import datetime
 import uuid
@@ -11,39 +12,13 @@ import random
 from typing import List, Tuple
 import json
 import PIL
+from sklearn.model_selection import train_test_split
 
 import numpy as np
 import torch
 
 sys.path.append('./visualize')
 from visualize import get_cvat_bbox, remove_img_with_no_annot
-
-def create_data_splits(image_files:list, label_files:list, train_ratio:float=0.70, test_ratio:float=0.15, val_ratio:float=0.15):
-    """
-    """
-    # Combine image and label file names into tuples
-    data = list(zip(image_files, label_files))
-    
-    # Shuffle the data randomly
-    random.shuffle(data)
-    
-    # Calculate the number of samples for each split
-    total_samples = len(data)
-    train_samples = round(total_samples * train_ratio)
-    test_samples = round(total_samples * test_ratio)
-    val_samples = round(total_samples * val_ratio)
-    
-    # Split the data into train, test, and validation sets
-    train_data = data[:train_samples]
-    test_data = data[train_samples:train_samples + test_samples]
-    val_data = data[train_samples + test_samples:]
-    
-    # Unzip the data to obtain separate image and label lists for each split
-    train_images, train_labels = zip(*train_data)
-    test_images, test_labels = zip(*test_data)
-    val_images, val_labels = zip(*val_data)
-    
-    return train_images, train_labels, test_images, test_labels, val_images, val_labels
 
 def calc_x_y_center(xtl:float, ytl:float, xbr:float, ybr:float) -> Tuple[float, float]:
     """
@@ -54,6 +29,7 @@ def calc_x_y_center(xtl:float, ytl:float, xbr:float, ybr:float) -> Tuple[float, 
     return x_center, y_center
 
 def get_key_from_value(dictionary, value):
+    """Get the key from a dictionary based on a value"""
     for key, val in dictionary.items():
         if val == value:
             return key
@@ -86,44 +62,67 @@ def extract_label(data: dict, save_prefix:str, label_encoding_path:str='./data/p
     return image_filenames
     
 def get_files_with_annotations(path_to_annotations:str, \
-        path_to_img:str, \
-        save_prefix:str, \
+        path_to_imgs:str, \
         label_encoding_path:str='./data/processed/label_dict.json', \
         data_split:str='./data/processed/train/') -> List[str]:
     current_date = datetime.now()
     unique_id = uuid.uuid4()
     logname = f"{current_date.strftime('%Y%m%d%H%M%S')}_{unique_id}"
     
-    image_filenames = []
-    
+    label_filenames = list()
+    img_filenames = list()
     for xml in os.listdir(path_to_annotations):
         xml_path = os.path.join(path_to_annotations, xml)
         label_map = get_cvat_bbox(xml_path)
         filtered_map = remove_img_with_no_annot(label_map, logname)
-        image_filenames.extend(extract_label(filtered_map, save_prefix, label_encoding_path, data_split))
-    print(len(image_filenames))
+        label_filenames.extend(extract_label(filtered_map, xml.split('.')[0], label_encoding_path, data_split))
     
-    tmp_new_filenames = list()    
-    for img in os.listdir(path_to_img):
-        if img in image_filenames:
-            new_filename = f"{save_prefix}_{img}"
-            image = PIL.Image.open(os.path.join(path_to_img, img))
-            image.save(os.path.join(data_split, 'images', new_filename))
-            tmp_new_filenames.append(new_filename)
-    print(len(tmp_new_filenames))
+        for root, dirs, files in os.walk(path_to_imgs):
+            for directory in dirs:
+                if directory == xml.split('.')[0]:
+                    video_dir = os.path.join(root, directory)    
+                    for img in os.listdir(video_dir):
+                        if img in label_filenames:
+                            new_filename = f"{directory}_{img}"
+                            image = PIL.Image.open(os.path.join(video_dir, img))
+                            image.save(os.path.join(data_split, 'images', new_filename))
+                            img_filenames.append(new_filename)
+    return label_filenames, img_filenames
+
+def split_train_test_files(train_ratio:float=0.8, parent_dir:str='./data/processed/train'):
+    """
+    """
+    test_label_dir = './data/processed/test/labels'
+    test_images_dir = './data/processed/test/images'
+    
+    label_files = os.listdir(os.path.join(parent_dir, 'labels'))
+    image_files = os.listdir(os.path.join(parent_dir, 'images'))
+    
+    _, test_labels, _, test_images = train_test_split(
+        image_files, label_files, train_size=train_ratio, random_state=42
+    )
+    
+    for filename in test_labels:
+        shutil.move(os.path.join(parent_dir, 'labels', filename), test_label_dir)
+    for filename in test_images:
+        shutil.move(os.path.join(parent_dir, 'images', filename), test_images_dir)
 
 if __name__ == '__main__':
-    """
-    xml_path = "./annotations/train/annotations 1.xml"
-    current_date = datetime.now()
-    unique_id = uuid.uuid4()
-    logname = f"{current_date.strftime('%Y%m%d%H%M%S')}_{unique_id}"
-    label_dict = get_cvat_bbox(xml_path)
-    annot_dict = remove_img_with_no_annot(label_dict, logname)
-    pprint(annot_dict)
-    """
+    label_filenames, img_filenames = get_files_with_annotations(path_to_annotations="./annotations/validation/", \
+        path_to_imgs="./data/raw/validation/", \
+        data_split="./data/processed/validation/")
     
-    get_files_with_annotations(path_to_annotations="./annotations/validation/", path_to_img="./data/raw/validation/video 3", save_prefix="video3", data_split="./data/processed/validation/")
+    print(len(label_filenames))
+    print(len(img_filenames))
+    
+    label_filenames, img_filenames = get_files_with_annotations(path_to_annotations="./annotations/train/", \
+        path_to_imgs="./data/raw/train/", \
+        data_split="./data/processed/train/")
+    
+    print(len(label_filenames))
+    print(len(img_filenames))
+    
+    split_train_test_files()
     
 
     
