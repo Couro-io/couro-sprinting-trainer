@@ -9,6 +9,7 @@ from pprint import pprint
 from datetime import datetime
 import numpy as np
 import pandas as pd
+import random
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -67,7 +68,7 @@ def remove_img_with_no_annot(label_map:dict, log_name:str) -> dict:
     create_log_file(log_name, empty_keys)
     return filtered_dict
 
-def draw_bbox_on_img(label_map: dict, image_path: str):
+def draw_cvat_bbox_on_img(label_map: dict, image_path: str):
     """
     Draws bounding boxes on an image based on the provided label map.
     Saves the annotated image with the bounding boxes.
@@ -91,6 +92,56 @@ def draw_bbox_on_img(label_map: dict, image_path: str):
         os.makedirs(save_dir, exist_ok=True)
         save_path = os.path.join(save_dir, f"{image_filename.split('.')[0]}_annotations.jpg")
         cv2.imwrite(save_path, image)
+
+def generate_sample(annotation_list:list, image_list:list, num_samples:int=5):
+    """
+    """
+    N = len(annotation_list)
+    sample_idx = random.sample(range(N), num_samples)
+    sampled_annotation_list = [annotation_list[i] for i in sample_idx]
+    sampled_image_list = [image_list[i] for i in sample_idx]
+    return sampled_annotation_list, sampled_image_list
+
+def get_coco_bbox(image_path, bbox, color=(0, 0, 255), thickness=2):
+    """
+    """
+    # Load the image
+    img = cv2.imread(image_path)
+
+    # Get image dimensions
+    img_height, img_width = img.shape[:2]
+
+    # Unpack bounding box attributes
+    class_id, x_center, y_center, width, height = bbox
+
+    # Convert bounding box coordinates from normalized to pixel values
+    x_center *= img_width
+    y_center *= img_height
+    width *= img_width
+    height *= img_height
+
+    # Compute top left (x1, y1) and bottom right (x2, y2) coordinates
+    x1 = int(x_center - (width / 2))
+    y1 = int(y_center - (height / 2))
+    x2 = int(x_center + (width / 2))
+    y2 = int(y_center + (height / 2))
+
+    # Draw the bounding box
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+
+    # Save or display the image
+    cv2.imshow('Image', img)
+    cv2.waitKey(0)
+    
+def draw_preprocess_bbox_on_img(annotation_path:str='./data/processed/validation/labels', image_path:str='./data/processed/validation/images', num_img:int=5):
+    """
+    """
+    all_annotation_list = os.listdir(annotation_path)
+    all_img_list = os.listdir(image_path)
+    sampled_annotation_list, sampled_image_list = generate_sample(all_annotation_list, all_img_list, num_img)
+    pass
+    
+    
         
 def get_single_video_label_count(label_map: dict) -> pd.DataFrame:
     """
