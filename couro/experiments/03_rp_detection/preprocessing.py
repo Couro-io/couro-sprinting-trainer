@@ -35,7 +35,7 @@ def get_key_from_value(dictionary, value):
             return key
     return None
 
-def extract_label(data: dict, save_prefix:str, label_encoding_path:str='./data/processed/label_dict.json.json', data_split:str='./data/processed/train/'):
+def extract_label(data: dict, save_prefix:str, label_encoding_path:str='./data/processed/label_dict.json', data_split:str='./data/processed/train/'):
     """
     labels should be named for the corresponding video_img_num combination with the following format:
     class x_center y_center width height
@@ -65,6 +65,7 @@ def get_files_with_annotations(path_to_annotations:str, \
         path_to_imgs:str, \
         label_encoding_path:str='./data/processed/label_dict.json', \
         data_split:str='./data/processed/train/') -> List[str]:
+    """"""
     current_date = datetime.now()
     unique_id = uuid.uuid4()
     logname = f"{current_date.strftime('%Y%m%d%H%M%S')}_{unique_id}"
@@ -77,7 +78,7 @@ def get_files_with_annotations(path_to_annotations:str, \
         filtered_map = remove_img_with_no_annot(label_map, logname)
         label_filenames.extend(extract_label(filtered_map, xml.split('.')[0], label_encoding_path, data_split))
     
-        for root, dirs, files in os.walk(path_to_imgs):
+        for root, dirs, _ in os.walk(path_to_imgs):
             for directory in dirs:
                 if directory == xml.split('.')[0]:
                     video_dir = os.path.join(root, directory)    
