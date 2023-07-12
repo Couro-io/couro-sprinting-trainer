@@ -7,9 +7,7 @@ import json
 
 @pytest.fixture
 def example_annotation() -> dict:
-    """
-    Example annotation dictionary
-    """
+    """Example annotation dictionary"""
     return {
         'label': 'Terminal Swing',
         'xtl': '2.0',
@@ -21,9 +19,24 @@ def example_annotation() -> dict:
     }
     
 @pytest.fixture
+def example_bbox() -> dict:
+    """Example bounding box dictionary"""
+    return {
+        'filename_001.jpg': [{
+            'label': 'Terminal Swing',
+            'xtl': '2.0',
+            'ytl': '2.0',
+            'xbr': '2.0',
+            'ybr': '2.0',
+            'width': '200',
+            'height': '200',
+        }]
+    }
+    
+@pytest.fixture
 def label_encoding_dict() -> dict:
     """Label encoding dictionary"""
-    label_encoding_path='./../data/processed/label_dict.json'
+    label_encoding_path='./data/processed/label_dict.json'
     with open(label_encoding_path, 'r') as file:
         label_encoding_dict = json.load(file)
     return label_encoding_dict
