@@ -1,5 +1,6 @@
-train: ./data/train
-val: ./data/validation
+train: ./data/processed/train/images
+val: ./data/processed/validation/images
+test: ./data/processed/test/images
 
 nc: 6
 names: ['Initial Swing', 'Midswing', 'Terminal Swing',  'Initial Contact', 'Midstance', 'Terminal Stance']
