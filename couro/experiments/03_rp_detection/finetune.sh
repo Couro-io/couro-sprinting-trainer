@@ -5,7 +5,6 @@ python train.py \
     --device cpu \
     --batch-size 16 \
     --data ./config/01_init.yaml \
-    --img 640 640 \
     --cfg ./config/training/rp_detection.yaml \
     --weights ./models/baseline/yolov7_training.pt \
     --name 01_rp_detection \
