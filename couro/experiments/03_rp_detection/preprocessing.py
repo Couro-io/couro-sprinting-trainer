@@ -24,10 +24,10 @@ label_encoding_path ='./data/processed/label_dict.json'
 with open(label_encoding_path, 'r') as file:
     LABEL_ENCODING_DICT = json.load(file)
 
-def calc_x_y_center(xtl:float, ytl:float, xbr:float, ybr:float) -> Tuple[float, float]:
+def calc_x_y_center(annotation:dict) -> Tuple[float, float]:
     """Calculate the center of a bounding box."""
-    x_center = (float(xbr) + float(xtl)) / 2
-    y_center = (float(ybr) + float(ytl)) / 2
+    x_center = (float(annotation['xbr']) + float(annotation['xtl'])) / 2 / float(annotation['img_width'])
+    y_center = (float(annotation['ybr']) + float(annotation['ytl'])) / 2 / float(annotation['img_height'])
     return x_center, y_center
 
 def get_key_from_value(dictionary, value) -> str:
@@ -39,13 +39,10 @@ def get_key_from_value(dictionary, value) -> str:
 
 def format_yolo_label_data(annotation:dict) -> str:
     """Format the annotation data for the YOLO model."""
-    x_center, y_center = calc_x_y_center(xtl=float(annotation['xtl']), 
-                                         ytl=float(annotation['ytl']), 
-                                         xbr=float(annotation['xbr']), 
-                                         ybr=float(annotation['ybr']))
+    x_center, y_center = calc_x_y_center(annotation)
     
-    width = float(annotation['xbr']) - float(annotation['xtl'])
-    height = float(annotation['ybr']) - float(annotation['ytl'])
+    width = (float(annotation['xbr']) - float(annotation['xtl'])) / float(annotation['img_width'])
+    height = (float(annotation['ybr']) - float(annotation['ytl'])) / float(annotation['img_height'])
     
     label = get_key_from_value(LABEL_ENCODING_DICT, annotation['label'])
     formatted_annotation = f"{label} {x_center} {y_center} {width} {height}"
