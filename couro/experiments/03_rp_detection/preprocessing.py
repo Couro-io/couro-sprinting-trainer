@@ -24,10 +24,10 @@ label_encoding_path ='./data/processed/label_dict.json'
 with open(label_encoding_path, 'r') as file:
     LABEL_ENCODING_DICT = json.load(file)
 
-def calc_x_y_center(xtl:float, ytl:float, xbr:float, ybr:float) -> Tuple[float, float]:
+def calc_x_y_center(annotation:dict) -> Tuple[float, float]:
     """Calculate the center of a bounding box."""
-    x_center = (float(xbr) + float(xtl)) / 2
-    y_center = (float(ybr) + float(ytl)) / 2
+    x_center = (float(annotation['xbr']) + float(annotation['xtl'])) / 2 / float(annotation['img_width'])
+    y_center = (float(annotation['ybr']) + float(annotation['ytl'])) / 2 / float(annotation['img_height'])
     return x_center, y_center
 
 def get_key_from_value(dictionary, value) -> str:
@@ -39,13 +39,10 @@ def get_key_from_value(dictionary, value) -> str:
 
 def format_yolo_label_data(annotation:dict) -> str:
     """Format the annotation data for the YOLO model."""
-    x_center, y_center = calc_x_y_center(xtl=float(annotation['xtl']), 
-                                         ytl=float(annotation['ytl']), 
-                                         xbr=float(annotation['xbr']), 
-                                         ybr=float(annotation['ybr']))
+    x_center, y_center = calc_x_y_center(annotation)
     
-    width = float(annotation['xbr']) - float(annotation['xtl'])
-    height = float(annotation['ybr']) - float(annotation['ytl'])
+    width = (float(annotation['xbr']) - float(annotation['xtl'])) / float(annotation['img_width'])
+    height = (float(annotation['ybr']) - float(annotation['ytl'])) / float(annotation['img_height'])
     
     label = get_key_from_value(LABEL_ENCODING_DICT, annotation['label'])
     formatted_annotation = f"{label} {x_center} {y_center} {width} {height}"
@@ -68,10 +65,10 @@ def extract_label(data: dict) -> dict:
     return label_data
 
 def save_label_data(label_data:dict, video_name:str, path_to_save:str):
-    """"""
+    """Save the labeled data"""
     for image_filename, annotations in label_data.items():
         label_filename = os.path.join(path_to_save, 'labels', f"{video_name}_{image_filename.split('.')[0]}.txt")
-        with open(label_filename, 'w') as file:
+        with open(label_filename, 'w', encoding='utf-8') as file:
             for annotation in annotations:
                 file.write(annotation + '\n')
 
@@ -97,7 +94,7 @@ def rename_image_file(image_name_map: dict):
 def get_files_with_annotations(path_to_annotations:str, \
         path_to_imgs:str, \
         data_split:str='./data/processed/train/'):
-    """"""
+    """Generate the files with annotations"""
     current_date = datetime.now()
     unique_id = uuid.uuid4()
     logname = f"{current_date.strftime('%Y%m%d%H%M%S')}_{unique_id}"
@@ -116,6 +113,7 @@ def get_files_with_annotations(path_to_annotations:str, \
         
 def split_train_test_files(train_ratio:float=0.8, parent_dir:str='./data/processed/train'):
     """
+    Create train/test splits for the images and annotations
     """
     test_label_dir = './data/processed/test/labels'
     test_images_dir = './data/processed/test/images'
@@ -140,7 +138,9 @@ def split_train_test_files(train_ratio:float=0.8, parent_dir:str='./data/process
     print(f"Number of train image files: {len(os.listdir(train_image_dir))}")
 
 if __name__ == '__main__':
-    
+    ########################################################################################################
+    # Create validation set images and annotations
+    ########################################################################################################
     get_files_with_annotations(
         path_to_annotations="./annotations/validation/", \
         path_to_imgs="./data/raw/validation/", \
@@ -150,6 +150,9 @@ if __name__ == '__main__':
     print(f"Number of validation label files: {len(os.listdir('./data/processed/validation/labels'))}")
     print(f"Number of validation image files: {len(os.listdir('./data/processed/validation/images'))}")
     
+    ########################################################################################################
+    # Create train/test set images and annotations
+    ########################################################################################################
     get_files_with_annotations(
         path_to_annotations="./annotations/train/", \
         path_to_imgs="./data/raw/train/", \
@@ -159,5 +162,8 @@ if __name__ == '__main__':
     print(f"Number of train/test label files: {len(os.listdir('./data/processed/train/labels'))}")
     print(f"Number of train/test image files: {len(os.listdir('./data/processed/train/images'))}")
     
+    ########################################################################################################
+    # Split into separate train and test splits
+    ########################################################################################################
     split_train_test_files()
     

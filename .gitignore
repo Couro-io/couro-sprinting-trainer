@@ -18,3 +18,5 @@ venv/
 *.log
 *.txt
 runs/
+*.cache
+labels.cache
