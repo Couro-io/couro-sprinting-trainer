@@ -1,5 +1,5 @@
 """
-Visualize annotation and predictions.
+Visualize the images and CVAT annotations both before and after data preprocessing.
 """
 import os
 import sys
@@ -102,36 +102,50 @@ def generate_sample(annotation_list:list, image_list:list, num_samples:int=5):
     sampled_image_list = [image_list[i] for i in sample_idx]
     return sampled_annotation_list, sampled_image_list
 
-def get_coco_bbox(image_path, bbox, color=(0, 0, 255), thickness=2):
-    """
-    """
+def get_coco_bboxes(image_path, bboxes, color=(0, 0, 255), thickness=2):
     # Load the image
     img = cv2.imread(image_path)
 
     # Get image dimensions
     img_height, img_width = img.shape[:2]
 
-    # Unpack bounding box attributes
-    class_id, x_center, y_center, width, height = bbox
+    for bbox in bboxes:
+        # Unpack bounding box attributes
+        bbox = [float(element) for element in bbox]
+        class_id, x_center, y_center, width, height = bbox
 
-    # Convert bounding box coordinates from normalized to pixel values
-    x_center *= img_width
-    y_center *= img_height
-    width *= img_width
-    height *= img_height
+        # Convert bounding box coordinates from normalized to pixel values
+        x_center *= img_width
+        y_center *= img_height
+        width *= img_width
+        height *= img_height
 
-    # Compute top left (x1, y1) and bottom right (x2, y2) coordinates
-    x1 = int(x_center - (width / 2))
-    y1 = int(y_center - (height / 2))
-    x2 = int(x_center + (width / 2))
-    y2 = int(y_center + (height / 2))
+        # Compute top left (x1, y1) and bottom right (x2, y2) coordinates
+        x1 = int(x_center - (width / 2))
+        y1 = int(y_center - (height / 2))
+        x2 = int(x_center + (width / 2))
+        y2 = int(y_center + (height / 2))
 
-    # Draw the bounding box
-    cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+        # Draw the bounding box
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
 
-    # Save or display the image
-    cv2.imshow('Image', img)
-    cv2.waitKey(0)
+    image_name = os.path.splitext(os.path.basename(image_path))[0]  # Get image basename without extension
+    output_path = f'./data/qa/{image_name}_with_bboxes.jpg'
+    cv2.imwrite(output_path, img)
+    print(f"Image with bounding boxes saved as: {output_path}")
+    
+def load_coco_annot_file(file_path:str) -> list:
+    try:
+        with open(file_path, 'r') as file:
+            file_contents = []
+            for line in file:
+                line_elements = line.strip().split()
+                if len(line_elements) > 0:
+                    file_contents.append(line_elements)
+            return file_contents
+    except FileNotFoundError:
+        print(f"File '{file_path}' not found.")
+        return []
     
 def draw_preprocess_bbox_on_img(annotation_path:str='./data/processed/validation/labels', image_path:str='./data/processed/validation/images', num_img:int=5):
     """
@@ -139,9 +153,14 @@ def draw_preprocess_bbox_on_img(annotation_path:str='./data/processed/validation
     all_annotation_list = os.listdir(annotation_path)
     all_img_list = os.listdir(image_path)
     sampled_annotation_list, sampled_image_list = generate_sample(all_annotation_list, all_img_list, num_img)
-    pass
-    
-    
+    for i, annotation in enumerate(sampled_annotation_list):
+        img = sampled_image_list[i]
+        
+        full_annotation_path = os.path.join(annotation_path, annotation)
+        full_img_path = os.path.join(image_path, img)
+        
+        bbox = load_coco_annot_file(full_annotation_path)
+        get_coco_bboxes(full_img_path, bbox)
         
 def get_single_video_label_count(label_map: dict) -> pd.DataFrame:
     """
@@ -208,15 +227,18 @@ def return_video1_pipe():
     draw_bbox_on_img(label_map, image_path)
     df = get_single_video_label_count(label_map)
     draw_barplot(df, title='video 1')
+    
+def get_train_val_label_dist():
+    """
+    Get the label distribution for the training and validation set.
+    """
+    df = get_multi_video_label_count(annotation_dir='./annotations/train/')
+    draw_barplot(df, title='Training set')
+    
+    df = get_multi_video_label_count(annotation_dir='./annotations/validation/')
+    draw_barplot(df, title='Validation set')
             
             
 if __name__ == "__main__":
-    current_date = datetime.now()
-    formatted_date = current_date.strftime("%m%d%Y")
-
-    df = get_multi_video_label_count(annotation_dir='./annotations/train/')
-    draw_barplot(df, title='Training set', save_png_name=f'train_label_dist_{formatted_date}.png')
-    
-    df = get_multi_video_label_count(annotation_dir='./annotations/validation/')
-    draw_barplot(df, title='Validation set', save_png_name=f'val_label_dist_{formatted_date}.png')
+    draw_preprocess_bbox_on_img()
     
