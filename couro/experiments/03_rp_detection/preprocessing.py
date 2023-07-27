@@ -76,7 +76,7 @@ def create_new_image_name_map(filtered_filenames:list, video_name:str, path_to_o
     """Create new image name mapping for the filtered images."""
 
     image_name_map = dict()
-    video_dir = os.path.join(path_to_orig_imgs, video_name)    
+    video_dir = path_to_orig_imgs  
     for orig_imgname in os.listdir(video_dir):
         if orig_imgname in filtered_filenames:
             original_path = os.path.join(video_dir, orig_imgname)
@@ -106,9 +106,9 @@ def get_files_with_annotations(path_to_annotations:str, \
         label_data = extract_label(filtered_map)
         save_label_data(label_data, video_name=xml.split('.')[0], path_to_save=data_split)
         image_name_map = create_new_image_name_map(filtered_filenames=label_data.keys(), \
-                                                   video_name=xml.split('.')[0], \
-                                                   path_to_orig_imgs=path_to_imgs, \
-                                                   path_to_new_imgs=data_split)
+                                                video_name=xml.split('.')[0], \
+                                                path_to_orig_imgs=path_to_imgs, \
+                                                path_to_new_imgs=data_split)
         rename_image_file(image_name_map)
         
 def split_train_test_files(train_ratio:float=0.8, parent_dir:str='./data/processed/train'):
