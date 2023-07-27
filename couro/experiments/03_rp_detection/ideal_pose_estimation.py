@@ -109,9 +109,13 @@ def process_frame_batch(args):
     """Processes a batch of frames."""
     frame, idx, model = args
     output, processed_frame = run_inference(frame, model)
-    processed_frame = draw_keypoints(output, processed_frame, model)  # Pass the model here
-    processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-    return processed_frame
+    output = non_max_suppression_kpt(output, 
+                                            0.25, # Confidence Threshold
+                                            0.65, # IoU Threshold
+                                            nc=model.yaml['nc'], # Number of Classes
+                                            nkpt=model.yaml['nkpt'], # Number of Keypoints
+                                            kpt_label=True)
+    return output
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='test.py')
@@ -145,7 +149,7 @@ if __name__ == "__main__":
     nc = int(data['nc'])
     dataloader = create_dataloader(path=test_frames_dir, imgsz=img_size, batch_size=opt.batch_size, stride=grid_size, opt=opt, pad=0.5, rect=True, prefix='')[0]
     
-    # 1. Predict the running phases
+    # 1. STAGE 1: Predict the running phases
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader)):
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -162,8 +166,6 @@ if __name__ == "__main__":
                                       iou_thres=0.65, \
                                       labels=lb, \
                                       multi_label=True)
-            print(targets)
-            print(out)
 
         for si, pred in enumerate(out):
             labels = targets[targets[:, 0] == si, 1:]
@@ -178,11 +180,32 @@ if __name__ == "__main__":
                                  "scores": {"class_score": conf},
                                  "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
             boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
-            pprint(boxes)
         
+    # 2. STAGE 2: Run pose estimation
+    model_path="./models/baseline/yolov7-w6-pose.pt"
+    model = torch.load(model_path, map_location=device)['model']
+    model.float().eval()
+    if torch.cuda.is_available():
+        model.half().to(device)
+        
+    frames = list()
+    for file in os.listdir(test_frames_dir):
+        frames.append(cv2.imread(os.path.join(test_frames_dir, file)))
+        
+    frame_dataset = FrameDataset(frames)
+    dataloader = DataLoader(frame_dataset, batch_size=opt.batch_size)
+        
+    pe_outputs = []
     
-    # 2. Calculate joint angles for every frame
+    with mp.Pool(processes=8) as pool:
+        for frame_batch, idx_batch in tqdm(dataloader):
+            processed_batch = pool.map(process_frame_batch, [(frame, idx, model) for frame, idx in zip(frame_batch, idx_batch)])
+            pe_outputs.extend(processed_batch)
+            
+    print(pe_outputs)
     
-    # 3. Save them with true and predicted labels
+    # 3. Calculate joint angles for every frame
+    
+    # 4. Save them with true and predicted labels
     
     
