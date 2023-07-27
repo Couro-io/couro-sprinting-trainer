@@ -3,10 +3,14 @@ Evaluate model performance.
 """
 
 import os
+import yaml
+from tqdm import tqdm
+from pprint import pprint
 import sys
 import tempfile
 from urllib.parse import unquote
 from tqdm import tqdm
+import argparse
 
 import torch
 from torchvision import transforms
@@ -16,9 +20,15 @@ import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 
-from utils.datasets import letterbox
-from utils.general import non_max_suppression_kpt
-from utils.plots import output_to_keypoint, plot_skeleton_kpts
+from utils.datasets import letterbox, create_dataloader
+from utils.general import non_max_suppression_kpt, coco80_to_coco91_class, check_dataset, check_file, check_img_size, check_requirements, \
+    box_iou, non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path, colorstr
+from utils.plots import output_to_keypoint, plot_skeleton_kpts, plot_images, output_to_target, plot_study_txt
+from models.experimental import attempt_load
+from utils.metrics import ap_per_class, ConfusionMatrix
+from utils.torch_utils import select_device, time_synchronized, TracedModel
+
+from preprocessing import get_files_with_annotations
 
 class FrameDataset(Dataset):
     """Dataloader for video data."""
@@ -104,23 +114,75 @@ def process_frame_batch(args):
     return processed_frame
 
 if __name__ == "__main__":
-    test_file = "./tests/CaVa73_230528_LJ3_400.mov"
-    weights = "./runs/train/01_rp_detection6/weights/best.pt"
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    batch_size = 8
-    model = load_model(device, weights)    
-        
-    frames, fps = load_video(test_file)
-        
-    frame_dataset = FrameDataset(frames)
-    dataloader = DataLoader(frame_dataset, batch_size=batch_size)
-
-    processed_frames = []
+    parser = argparse.ArgumentParser(prog='test.py')
+    parser.add_argument('--single-cls', default='False', action='store_true', help='treat as single-class dataset')
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--batch_size', type=int, default=8, help='size of each image batch')
+    parser.add_argument('--img_size', type=int, default=640, help='inference size (pixels)')
+    opt = parser.parse_args()
     
-    for frame in frames:
-        output, processed_frame = run_inference(frame, model)
-        print(output)
-        print(type(output))
-        print(processed_frame)
-        print(type(processed_frame))
-        break
+    # 0. Initialize test case
+    test_frames_dir = "./data/processed/ipe/images"
+    weights = "./runs/train/01_rp_detection6/weights/best.pt"
+    device = select_device(opt.device, batch_size=opt.batch_size)
+    model = attempt_load(weights, map_location=device)  # load FP32 model
+    names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
+    model.eval()
+    half_precision=True
+    grid_size = max(int(model.stride.max()), 32)  
+    img_size = check_img_size(opt.img_size, s=grid_size)
+    
+    half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
+    save_hybrid = False
+    if half:
+        model.half()
+    
+    data_file = "./config/01_init.yaml"
+    with open(data_file) as f:
+        data = yaml.load(f, Loader=yaml.SafeLoader)
+    check_dataset(data)
+    
+    nc = int(data['nc'])
+    dataloader = create_dataloader(path=test_frames_dir, imgsz=img_size, batch_size=opt.batch_size, stride=grid_size, opt=opt, pad=0.5, rect=True, prefix='')[0]
+    
+    # 1. Predict the running phases
+    for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader)):
+        img = img.to(device, non_blocking=True)
+        img = img.half() if half else img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        targets = targets.to(device)
+        nb, _, height, width = img.shape  # batch size, channels, height, width
+        with torch.no_grad():
+            out, train_out = model(img)
+            
+            targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
+            lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
+            out = non_max_suppression(out, \
+                                      conf_thres=0.25, \
+                                      iou_thres=0.65, \
+                                      labels=lb, \
+                                      multi_label=True)
+            print(targets)
+            print(out)
+
+        for si, pred in enumerate(out):
+            labels = targets[targets[:, 0] == si, 1:]
+            nl = len(labels)
+            tcls = labels[:, 0].tolist() if nl else []  # target class
+            predn = pred.clone()
+            scale_coords(img[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1])  # native-space pred
+            
+            box_data = [{"position": {"minX": xyxy[0], "minY": xyxy[1], "maxX": xyxy[2], "maxY": xyxy[3]},
+                                 "class_id": int(cls),
+                                 "box_caption": "%s %.3f" % (names[cls], conf),
+                                 "scores": {"class_score": conf},
+                                 "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
+            boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
+            pprint(boxes)
+        
+    
+    # 2. Calculate joint angles for every frame
+    
+    # 3. Save them with true and predicted labels
+    
+    
