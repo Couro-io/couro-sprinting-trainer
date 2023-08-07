@@ -7,10 +7,14 @@ import yaml
 from tqdm import tqdm
 from pprint import pprint
 import sys
+import math
 import tempfile
+import random
 from urllib.parse import unquote
 from tqdm import tqdm
 import argparse
+from pathlib import Path
+
 
 import torch
 from torchvision import transforms
@@ -30,6 +34,10 @@ from utils.torch_utils import select_device, time_synchronized, TracedModel
 
 from preprocessing import get_files_with_annotations
 
+import matplotlib
+matplotlib.use('TkAgg')  # Use the Tkinter backend for GUI display
+import matplotlib.pyplot as plt
+
 class FrameDataset(Dataset):
     """Dataloader for video data."""
     def __init__(self, frames):
@@ -42,12 +50,13 @@ class FrameDataset(Dataset):
         frame = self.frames[idx]
         return frame, idx
     
-def load_model(device, model_path:str="./yolov7/yolov7-w6-pose.pt"):
+def load_model(device, half, weights = "./runs/train/01_rp_detection6/weights/best.pt"):
     """Default model is yolo v7 pose estimation"""
-    model = torch.load(model_path, map_location=device)['model']
-    model.float().eval()
-    if torch.cuda.is_available():
-        model.half().to(device)
+    model = attempt_load(weights, map_location=device)  # load FP32 model
+    model.eval()
+    
+    if half:
+        model.half()
     return model
 
 def run_inference(image, model):
@@ -105,17 +114,154 @@ def load_video(file_path):
     cap.release()
     return frames, fps
 
+def get_xy_coords(kpts, steps=3):
+    """
+    """
+    num_kpts = len(kpts) // steps
+    for kid in range(num_kpts):
+        x_coord, y_coord = kpts[steps * kid], kpts[steps * kid + 1]
+        if not (x_coord % 640 == 0 or y_coord % 640 == 0):
+            if steps == 3:
+                conf = kpts[steps * kid + 2]
+                if conf < 0.5:
+                    continue
+            return x_coord, y_coord
+
 def process_frame_batch(args):
     """Processes a batch of frames."""
     frame, idx, model = args
-    output, processed_frame = run_inference(frame, model)
-    output = non_max_suppression_kpt(output, 
-                                            0.25, # Confidence Threshold
-                                            0.65, # IoU Threshold
-                                            nc=model.yaml['nc'], # Number of Classes
-                                            nkpt=model.yaml['nkpt'], # Number of Keypoints
+    output, image = run_inference(frame, model)
+    nms_output = non_max_suppression_kpt(output, 
+                                            0.25, 
+                                            0.65, 
+                                            nc=model.yaml['nc'], 
+                                            nkpt=model.yaml['nkpt'], 
                                             kpt_label=True)
-    return output
+    with torch.no_grad():
+        kp_output = output_to_keypoint(nms_output)
+    
+    img = draw_keypoints(output, image, model)
+    #plt.figure(figsize=(8,8))
+    #plt.axis('off')
+    #plt.imshow(img)
+    #plt.show()
+
+    kpt_xy_coords = list()    
+    for idx in range(kp_output.shape[0]):
+        x_coord, y_coord = get_xy_coords(kp_output[idx, 7:].T)
+        kpt_xy_coords.append((x_coord, y_coord))
+    return kpt_xy_coords
+
+def draw_predicted_bbox(image, bbox_predictions):
+    for bbox in bbox_predictions:
+        batch_id, class_id, x, y, w, h, conf = bbox
+
+        # Convert coordinates to integers
+        x, y, w, h = int(x), int(y), int(w), int(h)
+
+        # Draw bounding box on the image
+        color = (0, 255, 0)  # Green color for the box
+        thickness = 2
+        cv2.rectangle(image, (x, y), (x + w, y + h), color, thickness)
+
+        # Optionally, you can add text to label the bounding boxes with confidence or class_id
+        # text = f"{conf:.2f}"  # Example: Show confidence with two decimal places
+        # cv2.putText(image, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    return image
+
+def plot_one_box(box, img, label=None, color=None, line_thickness=None):
+    # Function to draw a single bounding box on the image
+    tl = line_thickness or round(0.002 * max(img.shape[0:2])) + 1  # line thickness
+    tf = max(tl - 1, 1)  # font thickness
+
+    c1, c2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
+    color = color or [random.randint(0, 255) for _ in range(3)]
+
+    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+
+    if label:
+        tf = max(tl - 1, 1)  # font thickness
+        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
+
+        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [220, 220, 220], thickness=tf, lineType=cv2.LINE_AA)
+
+    return img
+
+colors = [
+    [255, 0, 0],     # Red
+    [0, 255, 0],     # Green
+    [0, 0, 255],     # Blue
+    [255, 255, 0],   # Yellow
+    [255, 0, 255],   # Magenta
+    [0, 255, 255],   # Cyan
+]
+
+def plot_images(images, targets, paths=None, names=None, max_size=640, line_thickness=3):
+    # Plot individual images with bounding boxes
+
+    if isinstance(images, torch.Tensor):
+        images = images.cpu().float().numpy()
+    if isinstance(targets, torch.Tensor):
+        targets = targets.cpu().numpy()
+
+    # un-normalise
+    if np.max(images[0]) <= 1:
+        images *= 255
+
+    bs, _, h, w = images.shape  # batch size, _, height, width
+
+    # Check if we should resize
+    scale_factor = max_size / max(h, w)
+    if scale_factor < 1:
+        h = math.ceil(scale_factor * h)
+        w = math.ceil(scale_factor * w)
+
+    annotated_images = []
+
+    for i in range(bs):
+        img = images[i].transpose(1, 2, 0)
+        if scale_factor < 1:
+            img = cv2.resize(img, (w, h))
+
+        if len(targets) > 0:
+            image_targets = targets[targets[:, 0] == i]
+            boxes = xywh2xyxy(image_targets[:, 2:6]).T
+            classes = image_targets[:, 1].astype('int')
+            labels = image_targets.shape[1] == 6  # labels if no conf column
+            conf = None if labels else image_targets[:, 6]  # check for confidence presence (label vs pred)
+
+            if boxes.shape[1]:
+                if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
+                    boxes[[0, 2]] *= w  # scale to pixels
+                    boxes[[1, 3]] *= h
+                elif scale_factor < 1:  # absolute coords need scale if image scales
+                    boxes *= scale_factor
+            for j, box in enumerate(boxes.T):
+                cls = int(classes[j])
+                color = colors[cls % len(colors)]
+                cls = names[cls] if names else cls
+                if labels or conf[j] > 0.25:  # 0.25 conf thresh
+                    label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
+                    plot_one_box(box, img, label=label, color=color, line_thickness=line_thickness)
+
+        # Draw image filename labels
+        if paths:
+            label = Path(paths[i]).name[:40]  # trim to 40 chars
+            t_size = cv2.getTextSize(label, 0, fontScale=line_thickness / 3, thickness=line_thickness - 1)[0]
+            cv2.putText(img, label, (5, t_size[1] + 5), 0, line_thickness / 3, [220, 220, 220], thickness=line_thickness - 1,
+                        lineType=cv2.LINE_AA)
+
+        # Image border
+        cv2.rectangle(img, (0, 0), (w, h), (255, 255, 255), thickness=line_thickness)
+        cv2.imshow("Annotated Image", img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        annotated_images.append(img)
+
+    return annotated_images
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='test.py')
@@ -127,20 +273,17 @@ if __name__ == "__main__":
     
     # 0. Initialize test case
     test_frames_dir = "./data/processed/ipe/images"
-    weights = "./runs/train/01_rp_detection6/weights/best.pt"
     device = select_device(opt.device, batch_size=opt.batch_size)
-    model = attempt_load(weights, map_location=device)  # load FP32 model
-    names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
-    model.eval()
     half_precision=True
+    half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
+    model = load_model(device, half)
+
+    names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     grid_size = max(int(model.stride.max()), 32)  
     img_size = check_img_size(opt.img_size, s=grid_size)
-    
-    half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
+
     save_hybrid = False
-    if half:
-        model.half()
-    
+
     data_file = "./config/01_init.yaml"
     with open(data_file) as f:
         data = yaml.load(f, Loader=yaml.SafeLoader)
@@ -180,11 +323,24 @@ if __name__ == "__main__":
                                  "scores": {"class_score": conf},
                                  "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
             boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
+            
+        #predicted_bbox = output_to_target(out)
+        #print(predicted_bbox)
+        #drawn_img = draw_predicted_bbox(img[0].numpy(), predicted_bbox)
+
+        annot_images = plot_images(img, targets=targets)
+        for i in annot_images:
+            plt.figure(figsize=(8,8))
+            plt.axis('off')
+            plt.imshow(i)
+            plt.show()
         
+        break
+    """
     # 2. STAGE 2: Run pose estimation
     model_path="./models/baseline/yolov7-w6-pose.pt"
     model = torch.load(model_path, map_location=device)['model']
-    model.float().eval()
+    _ = model.float().eval()
     if torch.cuda.is_available():
         model.half().to(device)
         
@@ -201,11 +357,12 @@ if __name__ == "__main__":
         for frame_batch, idx_batch in tqdm(dataloader):
             processed_batch = pool.map(process_frame_batch, [(frame, idx, model) for frame, idx in zip(frame_batch, idx_batch)])
             pe_outputs.extend(processed_batch)
-            
     print(pe_outputs)
-    
+                            
     # 3. Calculate joint angles for every frame
     
-    # 4. Save them with true and predicted labels
     
+    # 4. Save them with true and predicted labels
+    """
+
     

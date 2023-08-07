@@ -174,7 +174,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
 
         # Draw image filename labels
         if paths:
-            label = Path(paths[i]).name[:40]  # trim to 40 char
+            label = Path(paths[i]).name[:40]  # trim to 40 œchar
             t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
             cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
                         lineType=cv2.LINE_AA)
@@ -486,4 +486,5 @@ def plot_skeleton_kpts(im, kpts, steps, orig_shape=None):
             continue
         if pos2[0] % 640 == 0 or pos2[1] % 640 == 0 or pos2[0]<0 or pos2[1]<0:
             continue
+        print(pos1, pos2)
         cv2.line(im, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
