@@ -14,7 +14,8 @@ from urllib.parse import unquote
 from tqdm import tqdm
 import argparse
 from pathlib import Path
-
+import matplotlib
+matplotlib.use('TkAgg')  # or 'Qt5Agg'
 
 import torch
 from torchvision import transforms
@@ -170,6 +171,15 @@ def draw_predicted_bbox(image, bbox_predictions):
 
     return image
 
+colors = [
+    [255, 0, 0],     # Red
+    [0, 255, 0],     # Green
+    [0, 0, 255],     # Blue
+    [255, 255, 0],   # Yellow
+    [255, 0, 255],   # Magenta
+    [0, 255, 255],   # Cyan
+]
+
 def plot_one_box(box, img, label=None, color=None, line_thickness=None):
     # Function to draw a single bounding box on the image
     tl = line_thickness or round(0.002 * max(img.shape[0:2])) + 1  # line thickness
@@ -190,16 +200,7 @@ def plot_one_box(box, img, label=None, color=None, line_thickness=None):
 
     return img
 
-colors = [
-    [255, 0, 0],     # Red
-    [0, 255, 0],     # Green
-    [0, 0, 255],     # Blue
-    [255, 255, 0],   # Yellow
-    [255, 0, 255],   # Magenta
-    [0, 255, 255],   # Cyan
-]
-
-def plot_images(images, targets, paths=None, names=None, max_size=640, line_thickness=3):
+def plot_single_image(images, targets, paths=None, names=None, max_size=640, line_thickness=3):
     # Plot individual images with bounding boxes
 
     if isinstance(images, torch.Tensor):
@@ -221,8 +222,10 @@ def plot_images(images, targets, paths=None, names=None, max_size=640, line_thic
 
     annotated_images = []
 
-    for i in range(bs):
-        img = images[i].transpose(1, 2, 0)
+    for i, img in enumerate(images):
+        img = img.transpose(1, 2, 0)
+        img = img.astype(np.uint8)
+
         if scale_factor < 1:
             img = cv2.resize(img, (w, h))
 
@@ -234,11 +237,12 @@ def plot_images(images, targets, paths=None, names=None, max_size=640, line_thic
             conf = None if labels else image_targets[:, 6]  # check for confidence presence (label vs pred)
 
             if boxes.shape[1]:
-                if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
-                    boxes[[0, 2]] *= w  # scale to pixels
+                if boxes.max() <= 1.01:  
+                    boxes[[0, 2]] *= w  
                     boxes[[1, 3]] *= h
-                elif scale_factor < 1:  # absolute coords need scale if image scales
+                elif scale_factor < 1:  
                     boxes *= scale_factor
+
             for j, box in enumerate(boxes.T):
                 cls = int(classes[j])
                 color = colors[cls % len(colors)]
@@ -254,11 +258,6 @@ def plot_images(images, targets, paths=None, names=None, max_size=640, line_thic
             cv2.putText(img, label, (5, t_size[1] + 5), 0, line_thickness / 3, [220, 220, 220], thickness=line_thickness - 1,
                         lineType=cv2.LINE_AA)
 
-        # Image border
-        cv2.rectangle(img, (0, 0), (w, h), (255, 255, 255), thickness=line_thickness)
-        cv2.imshow("Annotated Image", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
         annotated_images.append(img)
 
     return annotated_images
@@ -275,7 +274,7 @@ if __name__ == "__main__":
     test_frames_dir = "./data/processed/ipe/images"
     device = select_device(opt.device, batch_size=opt.batch_size)
     half_precision=True
-    half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
+    half = device.type != 'cpu' and half_precision  
     model = load_model(device, half)
 
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
@@ -292,7 +291,10 @@ if __name__ == "__main__":
     nc = int(data['nc'])
     dataloader = create_dataloader(path=test_frames_dir, imgsz=img_size, batch_size=opt.batch_size, stride=grid_size, opt=opt, pad=0.5, rect=True, prefix='')[0]
     
+    ###########################################################################
     # 1. STAGE 1: Predict the running phases
+    ###########################################################################
+
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader)):
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -322,13 +324,11 @@ if __name__ == "__main__":
                                  "box_caption": "%s %.3f" % (names[cls], conf),
                                  "scores": {"class_score": conf},
                                  "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
-            boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
-            
-        #predicted_bbox = output_to_target(out)
-        #print(predicted_bbox)
-        #drawn_img = draw_predicted_bbox(img[0].numpy(), predicted_bbox)
+            boxes = {"predictions": {"box_data": box_data, "class_labels": names}}
+        pprint(boxes)
 
-        annot_images = plot_images(img, targets=targets)
+        annot_images = plot_single_image(img, targets=targets)
+        print(annot_images)
         for i in annot_images:
             plt.figure(figsize=(8,8))
             plt.axis('off')
@@ -337,7 +337,10 @@ if __name__ == "__main__":
         
         break
     """
+    ###########################################################################
     # 2. STAGE 2: Run pose estimation
+    ###########################################################################
+
     model_path="./models/baseline/yolov7-w6-pose.pt"
     model = torch.load(model_path, map_location=device)['model']
     _ = model.float().eval()
