@@ -5,6 +5,7 @@ __pycache__
 tools/
 figure/
 images/
+/assets/
 venv/
 *.mp4
 *.mov
@@ -20,3 +21,4 @@ venv/
 runs/
 *.cache
 labels.cache
+**.DS_Store
