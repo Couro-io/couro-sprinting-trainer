@@ -10,6 +10,7 @@ venv/
 *.mp4
 *.mov
 
+*.pt
 *.pkl
 *.pth
 *.xml
