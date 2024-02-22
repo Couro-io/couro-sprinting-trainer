@@ -24,7 +24,7 @@ jobs:
           aws-region: us-west-1
 
       - name: Sync to CodeCommit
-        uses: ScottCampit/couro-running-trainer@main
+        uses: Couro-io/couro-running-trainer@main
         with:
           repository_name: couro-running-trainer
           aws_region: us-west-1
